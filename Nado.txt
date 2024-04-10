@@ -13,3 +13,11 @@ http://127.0.0.1:8080/login?username=VictorKopytovqwerty&password=qwerty123
 
 
 go run orchestrator.go
+
+http://127.0.0.1:8080/register?username=vk&password=vk
+eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3MTI3MzMxMjMsImlhdCI6MTcxMjczMjgyMywibmFtZSI6InZrIiwibmJmIj
+oxNzEyNzMyODIzLCJwYXNzd29yZCI6InZrIn0.GH9ZjGwKTxwkaFnD0oKC8Uk0ByaUbKNlvbASXadFxyI
+
+eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3MTI4MTkyNDUsInVzZXJuYW1lIjoidmsifQ.IkvTVGMzVSUiRSJQNS9U6QOLPD9iVgf0ThJEBUWlx8c
+
+127.0.0.1:8080/add?expression=(1+3)*5-2*7&token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3MTI3NTc1MTQsImlhdCI6MTcxMjc1NzIxNCwibmFtZSI6IlZpY3RvcktvcHl0b3Zxd2VydHkiLCJuYmYiOjE3MTI3NTcyMTQsInBhc3N3b3JkIjoicXdlcnR5MTIzIn0.qv4X34utWU9uJG5xGx3uyrMZ6HKFfYhmMoA_JYWfyI8

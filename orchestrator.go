@@ -114,10 +114,13 @@ func infixToPostfix(expression string) []string {
 	return result
 }
 
-func addExpressionHandler(w http.ResponseWriter, r *http.Request) {
-	// Получаем токен из заголовка Authorization
-	tokenString := r.Header.Get("Authorization")
+func addExampleToDB(expression string, tokenUser string) error {
+	ctx := context.TODO()
+	_, err := db.ExecContext(ctx, "INSERT INTO examples (expression, token_user) VALUES (?, ?)", expression, tokenUser)
+	return err
+}
 
+func parseToken(tokenString string) (string, error) {
 	// Проверяем токен на его валидность и извлекаем из него имя пользователя
 	token, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
 		// В реальном приложении здесь должна быть проверка подписи токена
@@ -125,25 +128,34 @@ func addExpressionHandler(w http.ResponseWriter, r *http.Request) {
 		return []byte("secret"), nil
 	})
 	if err != nil || !token.Valid {
-		http.Error(w, "Invalid token", http.StatusUnauthorized)
-		return
+		return "", fmt.Errorf("invalid token")
 	}
 
 	// Получаем имя пользователя из токена
 	claims, ok := token.Claims.(jwt.MapClaims)
 	if !ok {
-		http.Error(w, "Failed to parse token claims", http.StatusInternalServerError)
-		return
+		return "", fmt.Errorf("failed to parse token claims")
 	}
-	username, ok := claims["username"].(string)
+	username, ok := claims["name"].(string)
 	if !ok {
-		http.Error(w, "Failed to get username from token claims", http.StatusInternalServerError)
+		return "", fmt.Errorf("failed to get username from token claims")
+	}
+
+	return username, nil
+}
+
+func addExpressionHandler(w http.ResponseWriter, r *http.Request) {
+	// Получаем токен из заголовка Authorization
+	tokenString := r.FormValue("token")
+	expression := r.FormValue("expression")
+
+	// Добавляем выражение в базу данных
+	err := addExampleToDB(expression, username)
+	if err != nil {
+		http.Error(w, "Failed to add expression to database", http.StatusInternalServerError)
 		return
 	}
 
-	// Теперь у вас есть имя пользователя, которое отправляет запрос
-	// Вы можете использовать его для связи выражений с пользователем в базе данных
-	// Вместо моей заглушки вы можете реализовать код для сохранения выражения в базе данных
 	fmt.Fprintf(w, "Expression added by user: %s", username)
 }
 
@@ -215,12 +227,10 @@ func createTables(ctx context.Context, db *sql.DB) error {
 	);`
 
 		expressionsTable = `
-	CREATE TABLE IF NOT EXISTS expressions(
-		id INTEGER PRIMARY KEY AUTOINCREMENT, 
-		expression TEXT NOT NULL,
-		user_id INTEGER NOT NULL,
-	
-		FOREIGN KEY (user_id)  REFERENCES expressions (id)
+	CREATE TABLE IF NOT EXISTS examples (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    expression TEXT NOT NULL,
+    token_user TEXT
 	);`
 	)
 
@@ -342,61 +352,127 @@ func registerUserHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 // Функция для поиска пользователя в базе данных по имени и паролю
-func findUser(ctx context.Context, db *sql.DB, username, password string) (*User, error) {
-	fmt.Println("++++++++++")
+func findUser(w http.ResponseWriter, ctx context.Context, db *sql.DB, username, password string) (*User, error) {
+	db, err := sql.Open("sqlite3", "DataBase.db")
 	var user User
-	err := db.QueryRowContext(ctx, "SELECT id, token FROM users WHERE username = $1 AND password = $2", username, password).Scan(&user.ID, &user.token)
-	fmt.Println("++++++++++")
+	fmt.Println(username, password)
+	err = db.QueryRowContext(ctx, "SELECT id, token FROM users WHERE username = $1 AND password = $2", username, password).Scan(&user.ID, &user.token)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			return nil, nil // Пользователь не найден
 		}
 		return nil, err // Возникла ошибка при выполнении запроса
 	}
-	fmt.Println("++++++++++")
+
+	var users []User
+	var q = "SELECT id, Username, token FROM users"
+	rows, err := db.QueryContext(ctx, q)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var tokken *string
+	for rows.Next() {
+		u := User{}
+		err := rows.Scan(&u.ID, &u.Username, &u.token)
+		tokken = &u.token
+		if err != nil {
+			return nil, err
+		}
+		users = append(users, u)
+	}
+
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
+		"username": user.Username,
+		"exp":      time.Now().Add(time.Hour * 24).Unix(),
+	})
+	// Подписываем токен с секретным ключом
+	tokenString, err := token.SignedString([]byte("secret"))
+	if err != nil {
+		//http.Error(w, err.Error(), http.StatusInternalServerError)
+		return nil, fmt.Errorf(strconv.Itoa(http.StatusInternalServerError))
+	}
+	// Отправляем токен в ответе
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{"token": tokenString})
+
+	var qq = "UPDATE users SET token = $1 WHERE id = $2"
+	_, err = db.ExecContext(ctx, qq, token, users[0].ID)
+	if err != nil {
+		return nil, err
+	}
 	user.Username = username
 	user.Password = password
-	fmt.Println("++++++++++")
+	user.token = *tokken
+
 	return &user, nil // Пользователь найден
 }
 
 // Обработчик входа в аккаунт
 func loginHandler(w http.ResponseWriter, r *http.Request) {
-	fmt.Println("------")
 	// Получаем имя пользователя и пароль из запроса
 	username := r.FormValue("username")
 	password := r.FormValue("password")
-	fmt.Println("------")
 	// Проверяем ваших пользователей в базе данных
-	user, err := findUser(context.TODO(), db, username, password)
-	fmt.Println("------")
+	user, err := findUser(w, context.TODO(), db, username, password)
 	if err != nil {
 		http.Error(w, "Error finding user", http.StatusInternalServerError)
 		return
 	}
-	fmt.Println("------")
 	if user == nil {
 		// Пользователь не найден
 		http.Error(w, "User not found", http.StatusNotFound)
 		return
 	}
-	fmt.Println("------")
 	// Пользователь найден, создаем токен доступа
-	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
-		"username": user.Username,
-		"exp":      time.Now().Add(time.Hour * 24).Unix(),
-	})
-	fmt.Println("------")
-	// Подписываем токен с секретным ключом
-	tokenString, err := token.SignedString([]byte("secret"))
+	//token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
+	//	"username": user.Username,
+	//	"exp":      time.Now().Add(time.Hour * 24).Unix(),
+	//})
+	//// Подписываем токен с секретным ключом
+	//tokenString, err := token.SignedString([]byte("secret"))
+	//if err != nil {
+	//	http.Error(w, err.Error(), http.StatusInternalServerError)
+	//	return
+	//}
+	//// Отправляем токен в ответе
+	//w.Header().Set("Content-Type", "application/json")
+	//json.NewEncoder(w).Encode(map[string]string{"token": tokenString})
+	//
+	//var q = "UPDATE users SET balance = balance+$1 WHERE id = $2"
+	//_, err = db.ExecContext(ctx, q, diff, id)
+	//if err != nil {
+	//	return err
+	//}
+
+}
+
+func admin(w http.ResponseWriter, r *http.Request) {
+	db, err := sql.Open("sqlite3", "DataBase.db")
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	fmt.Println("------")
-	// Отправляем токен в ответе
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{"token": tokenString})
+	var users []User
+	var q = "SELECT id, Username, Password, token FROM users"
+	rows, err := db.QueryContext(context.TODO(), q)
+	if err != nil {
+		return
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		u := User{}
+		err := rows.Scan(&u.ID, &u.Username, &u.Password, &u.token)
+		if err != nil {
+			return
+		}
+		users = append(users, u)
+	}
+	for i := 0; i < len(users); i++ {
+		fmt.Fprintln(w, users[i].ID, users[i].Username, users[i].Password, users[i].token)
+		fmt.Fprintln(w, "________________________________")
+	}
+	return
 }
 
 func main() {
@@ -405,6 +481,9 @@ func main() {
 	http.HandleFunc("/settime", settime)
 	http.HandleFunc("/register", registerUserHandler)
 	http.HandleFunc("/login", loginHandler)
+
+	http.HandleFunc("/admin", admin)
+
 	fmt.Println("Server is running on port 8080")
 	if err := http.ListenAndServe(":8080", nil); err != nil {
 		fmt.Printf("Error starting server: %s\n", err)
