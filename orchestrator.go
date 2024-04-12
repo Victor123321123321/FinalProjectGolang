@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"github.com/golang-jwt/jwt/v5"
 	_ "github.com/mattn/go-sqlite3"
+	"log"
 	"net/http"
 	"os"
 	"strconv"
@@ -114,49 +115,75 @@ func infixToPostfix(expression string) []string {
 	return result
 }
 
-func addExampleToDB(expression string, tokenUser string) error {
+func addExampleToDB(expression string, tokenUser string, db *sql.DB) error {
 	ctx := context.TODO()
-	_, err := db.ExecContext(ctx, "INSERT INTO examples (expression, token_user) VALUES (?, ?)", expression, tokenUser)
+	_, err := db.ExecContext(ctx, "INSERT INTO examples (expression, token_user, result, isReady) VALUES (?, ?)", expression, tokenUser, 0, false)
 	return err
 }
 
-func parseToken(tokenString string) (string, error) {
-	// Проверяем токен на его валидность и извлекаем из него имя пользователя
-	token, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
-		// В реальном приложении здесь должна быть проверка подписи токена
-		// Я использую простую проверку секретного ключа, чтобы показать концепцию
-		return []byte("secret"), nil
-	})
-	if err != nil || !token.Valid {
-		return "", fmt.Errorf("invalid token")
-	}
-
-	// Получаем имя пользователя из токена
-	claims, ok := token.Claims.(jwt.MapClaims)
-	if !ok {
-		return "", fmt.Errorf("failed to parse token claims")
-	}
-	username, ok := claims["name"].(string)
-	if !ok {
-		return "", fmt.Errorf("failed to get username from token claims")
-	}
-
-	return username, nil
-}
-
 func addExpressionHandler(w http.ResponseWriter, r *http.Request) {
-	// Получаем токен из заголовка Authorization
-	tokenString := r.FormValue("token")
+	//Получаем токен из заголовка Authorization
 	expression := r.FormValue("expression")
+	tokenString := r.FormValue("token")
+	tokenFromString, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
+		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
+			panic(fmt.Errorf("unexpected signing method: %v", token.Header["alg"]))
+		}
 
-	// Добавляем выражение в базу данных
-	err := addExampleToDB(expression, username)
+		return []byte("super_secret_signature"), nil
+	})
 	if err != nil {
+		log.Fatal(err)
+	}
+	var username interface{}
+	if claims, ok := tokenFromString.Claims.(jwt.MapClaims); ok {
+		fmt.Println("username: ", claims["username"])
+		username = claims["username"]
+	} else {
+		panic(err)
+	}
+	db, err := sql.Open("sqlite3", "DataBase.db")
+	if err != nil {
+		log.Fatal(err)
+	}
+	var exists bool
+	err = db.QueryRowContext(context.TODO(), "SELECT EXISTS (SELECT 1 FROM users WHERE username = ?)", username).Scan(&exists)
+	if err != nil {
+		http.Error(w, "invalid token2", http.StatusBadRequest)
+		return
+	}
+	if exists {
+		err = addExampleToDB(expression, tokenString, db)
+		if err != nil {
+			http.Error(w, "Failed to add expression to database", http.StatusInternalServerError)
+			return
+		}
+		fmt.Fprintf(w, "Expression added by user: %s", tokenString)
+	} else {
 		http.Error(w, "Failed to add expression to database", http.StatusInternalServerError)
 		return
 	}
+	id := fmt.Sprintf("%d", time.Now().UnixNano())
+	task := &Task{
+		ID:      id,
+		Expr:    expression,
+		Result:  0,
+		IsReady: false,
+	}
+	mu.Lock()
+	tasks[id] = task
+	expressions[id] = &Expression2{
+		ID:         id,
+		Expression: expression,
+		Status:     "waiting",
+		Result:     0,
+		Date_start: time.Now(),
+	}
+	mu.Unlock()
 
-	fmt.Fprintf(w, "Expression added by user: %s", username)
+	go calculateExpression(task, id)
+
+	fmt.Fprint(w, id)
 }
 
 func calculateExpression(task *Task, id string) {
@@ -190,12 +217,32 @@ func calculateExpression(task *Task, id string) {
 }
 
 func listExpressionsHandler(w http.ResponseWriter, r *http.Request) {
+	tokenString := r.FormValue("token")
+	db, err := sql.Open("sqlite3", "DataBase.db")
+
+	var expressions []Task
+	var q = "SELECT id, expression, result, isReady FROM examples WHERE token = $1)"
+	rows, err := db.QueryContext(context.TODO(), q, tokenString)
+	if err != nil {
+		return
+	}
+	defer rows.Close()
+	for rows.Next() {
+		u := Task{}
+		err := rows.Scan(&u.ID, &u.Expr, &u.Result, &u.IsReady)
+		if err != nil {
+			return
+		}
+		expressions = append(expressions, u)
+	}
+
 	mu.RLock()
 	defer mu.RUnlock()
-	expressionList := make([]*Expression2, 0, len(expressions))
+	expressionList := make([]*Task, 0, len(expressions))
 	for _, expr := range expressions {
-		expr.Expression = strings.Replace(expr.Expression, " ", "+", -1)
-		expressionList = append(expressionList, expr)
+		expr.Expr = strings.Replace(expr.Expr, " ", "+", -1)
+		expressionList = append(expressionList, &expr)
+		fmt.Fprintln(w, expr.ID, expr.Expr, expr.IsReady, expr.Result)
 	}
 
 	json.NewEncoder(w).Encode(expressionList)
@@ -222,26 +269,26 @@ func createTables(ctx context.Context, db *sql.DB) error {
 	CREATE TABLE IF NOT EXISTS users(
 		id INTEGER PRIMARY KEY AUTOINCREMENT, 
 		username TEXT,
-		password TEXT NOT NULL CHECK(password >= 0),
-		token TEXT
+		password TEXT
 	);`
-
 		expressionsTable = `
 	CREATE TABLE IF NOT EXISTS examples (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     expression TEXT NOT NULL,
-    token_user TEXT
+    token_user TEXT,
+    result 		 string,
+    isReady		 bool
 	);`
 	)
-
+	fmt.Println("_+_+_+_+_+_+_+_+_+_+_+_+_")
 	if _, err := db.ExecContext(ctx, usersTable); err != nil {
 		return err
 	}
-
+	fmt.Println("_+_+_+_+_+_+_+_+_+_+_+_+_")
 	if _, err := db.ExecContext(ctx, expressionsTable); err != nil {
 		return err
 	}
-
+	fmt.Println("_+_+_+_+_+_+_+_+_+_+_+_+_")
 	return nil
 }
 
@@ -251,23 +298,26 @@ func createDB() (*sql.DB, error) {
 	if err != nil {
 		return nil, err
 	}
-
+	fmt.Println("_+_+_+_+_+_+_+_+_+_+_+_+_")
 	err = db.PingContext(ctx)
+	fmt.Println("_+_+_+_+_+_+_+_+_+_+_+_+_")
 	if err != nil {
 		return nil, err
 	}
+	fmt.Println("_+_+_+_+_+_+_+_+_+_+_+_+_")
 	if err = createTables(ctx, db); err != nil {
 		return nil, err
 	}
+	fmt.Println("_+_+_+_+_+_+_+_+_+_+_+_+_")
 
 	return db, nil
 }
 
 func insertUser(ctx context.Context, db *sql.DB, user *User) (int64, error) { // Добавлен параметр db
 	var q = `
-	INSERT INTO users (username, password, token) values ($1, $2, $3)
+	INSERT INTO users (username, password) values ($1, $2)
 	`
-	result, err := db.ExecContext(ctx, q, user.Username, user.Password, user.token) // Исправлен запрос
+	result, err := db.ExecContext(ctx, q, user.Username, user.Password) // Исправлен запрос
 	if err != nil {
 		return 0, err
 	}
@@ -282,12 +332,17 @@ type User struct {
 	ID       int
 	Username string
 	Password string
-	token    string
+}
+
+type ExpressionDB struct {
+	expression string
+	token_user string
 }
 
 func isUserExists(ctx context.Context, db *sql.DB, username string) (bool, error) {
 	var exists bool
-	err := db.QueryRowContext(ctx, "SELECT EXISTS (SELECT 1 FROM users WHERE username = ?)", username).Scan(&exists)
+	db, err := sql.Open("sqlite3", "DataBase.db")
+	err = db.QueryRowContext(ctx, "SELECT EXISTS (SELECT 1 FROM users WHERE username = ?)", username).Scan(&exists)
 	if err != nil {
 		return false, err
 	}
@@ -296,14 +351,17 @@ func isUserExists(ctx context.Context, db *sql.DB, username string) (bool, error
 
 // Обработчик регистрации нового пользователя
 func registerUserHandler(w http.ResponseWriter, r *http.Request) {
-	r.ParseForm()                       // Добавлен вызов ParseForm для обработки POST данных
+	fmt.Println("=======================")
+	r.ParseForm() // Добавлен вызов ParseForm для обработки POST данных
+	fmt.Println("=======================")
 	username := r.FormValue("username") // Исправлено использование FormValue для получения данных
 	password := r.FormValue("password") // Исправлено использование FormValue для получения данных
 	if username == "" || password == "" {
 		http.Error(w, "Username and password are required", http.StatusBadRequest)
 		return
 	}
-
+	fmt.Println("=======================")
+	fmt.Println("=======================")
 	const hmacSampleSecret = "super_secret_signature"
 	now := time.Now()
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
@@ -313,39 +371,44 @@ func registerUserHandler(w http.ResponseWriter, r *http.Request) {
 		"exp":      now.Add(5 * time.Minute).Unix(),
 		"iat":      now.Unix(),
 	})
+	fmt.Println("=======================")
 	tokenString, err := token.SignedString([]byte(hmacSampleSecret))
 	if err != nil {
 		panic(err)
 	}
-
+	fmt.Println("=======================")
 	fmt.Println(tokenString)
 	user := &User{
 		Username: username,
 		Password: password,
-		token:    tokenString, // Добавлена инициализация поля token
 	}
+	fmt.Println("=======================")
 	db, err := createDB()
 	exists, err := isUserExists(context.TODO(), db, username)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
+	fmt.Println("=======================")
 	if exists {
 		http.Error(w, "Такой пользователь уже существует", http.StatusBadRequest)
 		return
 	}
+	fmt.Println("=======================")
 	// Создание базы данных для добавления пользователя
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
+	fmt.Println("=======================")
+	db, err = sql.Open("sqlite3", "DataBase.db")
 	_, err = insertUser(context.TODO(), db, user) // Исправлен вызов insertUser
 	defer db.Close()
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-
+	fmt.Println("=======================")
 	// Отправляем ответ клиенту
 	w.WriteHeader(http.StatusCreated)
 	fmt.Fprintln(w, "Регистрация прошла успешно")
@@ -356,7 +419,7 @@ func findUser(w http.ResponseWriter, ctx context.Context, db *sql.DB, username, 
 	db, err := sql.Open("sqlite3", "DataBase.db")
 	var user User
 	fmt.Println(username, password)
-	err = db.QueryRowContext(ctx, "SELECT id, token FROM users WHERE username = $1 AND password = $2", username, password).Scan(&user.ID, &user.token)
+	err = db.QueryRowContext(ctx, "SELECT id FROM users WHERE username = $1 AND password = $2", username, password).Scan(&user.ID)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			return nil, nil // Пользователь не найден
@@ -365,29 +428,29 @@ func findUser(w http.ResponseWriter, ctx context.Context, db *sql.DB, username, 
 	}
 
 	var users []User
-	var q = "SELECT id, Username, token FROM users"
+	var q = "SELECT id, username FROM users"
 	rows, err := db.QueryContext(ctx, q)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var tokken *string
 	for rows.Next() {
 		u := User{}
-		err := rows.Scan(&u.ID, &u.Username, &u.token)
-		tokken = &u.token
+		err := rows.Scan(&u.ID, &u.Username)
 		if err != nil {
 			return nil, err
 		}
 		users = append(users, u)
 	}
-
+	now := time.Now()
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
-		"username": user.Username,
-		"exp":      time.Now().Add(time.Hour * 24).Unix(),
+		"username": username,
+		"nbf":      now.Unix(),
+		"exp":      now.Add(5 * time.Minute).Unix(),
+		"iat":      now.Unix(),
 	})
 	// Подписываем токен с секретным ключом
-	tokenString, err := token.SignedString([]byte("secret"))
+	tokenString, err := token.SignedString([]byte("super_secret_signature"))
 	if err != nil {
 		//http.Error(w, err.Error(), http.StatusInternalServerError)
 		return nil, fmt.Errorf(strconv.Itoa(http.StatusInternalServerError))
@@ -396,14 +459,8 @@ func findUser(w http.ResponseWriter, ctx context.Context, db *sql.DB, username, 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{"token": tokenString})
 
-	var qq = "UPDATE users SET token = $1 WHERE id = $2"
-	_, err = db.ExecContext(ctx, qq, token, users[0].ID)
-	if err != nil {
-		return nil, err
-	}
 	user.Username = username
 	user.Password = password
-	user.token = *tokken
 
 	return &user, nil // Пользователь найден
 }
@@ -430,7 +487,7 @@ func loginHandler(w http.ResponseWriter, r *http.Request) {
 	//	"exp":      time.Now().Add(time.Hour * 24).Unix(),
 	//})
 	//// Подписываем токен с секретным ключом
-	//tokenString, err := token.SignedString([]byte("secret"))
+	//tokenString, err := token.SignedString([]byte("super_secret_signature"))
 	//if err != nil {
 	//	http.Error(w, err.Error(), http.StatusInternalServerError)
 	//	return
@@ -453,25 +510,44 @@ func admin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var users []User
-	var q = "SELECT id, Username, Password, token FROM users"
+	var q = "SELECT id, Username, Password FROM users"
 	rows, err := db.QueryContext(context.TODO(), q)
 	if err != nil {
 		return
 	}
 	defer rows.Close()
-
 	for rows.Next() {
 		u := User{}
-		err := rows.Scan(&u.ID, &u.Username, &u.Password, &u.token)
+		err := rows.Scan(&u.ID, &u.Username, &u.Password)
 		if err != nil {
 			return
 		}
 		users = append(users, u)
 	}
 	for i := 0; i < len(users); i++ {
-		fmt.Fprintln(w, users[i].ID, users[i].Username, users[i].Password, users[i].token)
+		fmt.Fprintln(w, users[i].ID, users[i].Username, users[i].Password)
+	}
+	fmt.Fprintln(w, "\n================================================\n")
+	var expressionDB []ExpressionDB
+	var qq = "SELECT expression, token_user FROM examples"
+	rows, err = db.QueryContext(context.TODO(), qq)
+	if err != nil {
+		return
+	}
+	defer rows.Close()
+	for rows.Next() {
+		u := ExpressionDB{}
+		err := rows.Scan(&u.expression, &u.token_user)
+		if err != nil {
+			return
+		}
+		expressionDB = append(expressionDB, u)
+	}
+	for i := 0; i < len(expressionDB); i++ {
+		fmt.Fprintln(w, expressionDB[i].expression, expressionDB[i].token_user)
 		fmt.Fprintln(w, "________________________________")
 	}
+	fmt.Println("------------------------------------")
 	return
 }
 
