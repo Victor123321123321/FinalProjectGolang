@@ -2,14 +2,18 @@
 
 127.0.0.1:8080/settime?time+=10&time-=10&time*=10&time/=10&time_limit=50
 
-127.0.0.1:8080/add?expression=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3MTI4NjkxMDYsImlhdCI6MTcxMjg2ODgwNiwibmJmIjoxNzEyODY4ODA2LCJ1c2VybmFtZSI6IlZpY3RvcktvcHl0b3Zxd2VydHkifQ.4tXPhz9ixQ8bP4EkABOcd92niPUJ3wK-3ngemGqiCcE
-http://127.0.0.1:8080/list&token=
+127.0.0.1:8080/add?expression=(1+3)*5-2*7&token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3MTI5MzEyNjEsImlhdCI6MTcxMjkzMDk2MSwibmJmIjoxNzEyOTMwOTYxLCJ1c2VybmFtZSI6IjEifQ.Uso3RXUMV6izshXS0jAPFysoAtWKzkYW0RQHYbah28g
+
+127.0.0.1:8080/list?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3MTI5MzQ3ODcsImlhdCI6MTcxMjkzNDQ4NywibmJmIjoxNzEyOTM0NDg3LCJ1c2VybmFtZSI6IjEifQ.UCXUSdGbvtVyzF91dIZ_2FbO1QaafIxi9fbRZPE0L24
+
 
 http://127.0.0.1:8080/register?username=VictorKopytovqwerty&password=qwerty123
 http://127.0.0.1:8080/register?username=vk&password=vk
+http://127.0.0.1:8080/register?username=1&password=1
 
 http://127.0.0.1:8080/login?username=VictorKopytovqwerty&password=qwerty123
 http://127.0.0.1:8080/login?username=vk&password=vk
+http://127.0.0.1:8080/login?username=1&password=1
 
 http://127.0.0.1:8080/admin
 
@@ -19,8 +23,10 @@ go run orchestrator.go
 
 
 
-127.0.0.1:8080/add?expression=(1+3)*5-2*7&token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3MTI3NTc1MTQsImlhdCI6MTcxMjc1NzIxNCwibmFtZSI6IlZpY3RvcktvcHl0b3Zxd2VydHkiLCJuYmYiOjE3MTI3NTcyMTQsInBhc3N3b3JkIjoicXdlcnR5MTIzIn0.qv4X34utWU9uJG5xGx3uyrMZ6HKFfYhmMoA_JYWfyI8
+127.0.0.1:8080/add?expression=(1+3)*5-2*7&token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3MTI5MjA2MzEsImlhdCI6MTcxMjkyMDMzMSwibmJmIjoxNzEyOTIwMzMxLCJ1c2VybmFtZSI6IjIifQ.1Ij3jHi2R20eV9xXy5S3Sw3g2AdwEdmJzcujdZ4PLi4
 
 
-eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3MTI4NTY4NDQsImlhdCI6MTcxMjg1NjU0NCwibmJmIjoxNzEyODU2NTQ0LCJ1c2VybmFtZSI6IlZpY3RvcktvcHl0b3Zxd2VydHkifQ.7Df6oC6hZ_8EYTkntGS84dVKjXTiRfcTMR3ZgqYAAqA
-eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3MTI4NjkxMDYsImlhdCI6MTcxMjg2ODgwNiwibmJmIjoxNzEyODY4ODA2LCJ1c2VybmFtZSI6IlZpY3RvcktvcHl0b3Zxd2VydHkifQ.4tXPhz9ixQ8bP4EkABOcd92niPUJ3wK-3ngemGqiCcE
+127.0.0.1:8080/list?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3MTI5MzYyMDAsImlhdCI6MTcxMjkzNTkwMCwibmJmIjoxNzEyOTM1OTAwLCJ1c2VybmFtZSI6IjEyMyJ9.pGsD_x627aeF3XCGlWJ9ocwG-2d8sunjsfQc6KXloRg
+
+
+127.0.0.1:8080/add?expression=2+2*2&token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3MTI5MzYyMDAsImlhdCI6MTcxMjkzNTkwMCwibmJmIjoxNzEyOTM1OTAwLCJ1c2VybmFtZSI6IjEyMyJ9.pGsD_x627aeF3XCGlWJ9ocwG-2d8sunjsfQc6KXloRg

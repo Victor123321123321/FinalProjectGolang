@@ -115,10 +115,14 @@ func infixToPostfix(expression string) []string {
 	return result
 }
 
-func addExampleToDB(expression string, tokenUser string, db *sql.DB) error {
+func addExampleToDB(expression string, tokenUser string, db *sql.DB) (int, error) {
 	ctx := context.TODO()
-	_, err := db.ExecContext(ctx, "INSERT INTO examples (expression, token_user, result, isReady) VALUES (?, ?)", expression, tokenUser, 0, false)
-	return err
+	result, err := db.ExecContext(ctx, "INSERT INTO examples (expression, token_user, result, isReady) VALUES (?, ?, ?, ?)", expression, tokenUser, 0, false)
+	id, err := result.LastInsertId()
+	if err != nil {
+		return 0, err
+	}
+	return int(id), err
 }
 
 func addExpressionHandler(w http.ResponseWriter, r *http.Request) {
@@ -137,7 +141,6 @@ func addExpressionHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	var username interface{}
 	if claims, ok := tokenFromString.Claims.(jwt.MapClaims); ok {
-		fmt.Println("username: ", claims["username"])
 		username = claims["username"]
 	} else {
 		panic(err)
@@ -152,8 +155,9 @@ func addExpressionHandler(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid token2", http.StatusBadRequest)
 		return
 	}
+	var id_ex int
 	if exists {
-		err = addExampleToDB(expression, tokenString, db)
+		id_ex, err = addExampleToDB(expression, tokenString, db)
 		if err != nil {
 			http.Error(w, "Failed to add expression to database", http.StatusInternalServerError)
 			return
@@ -181,17 +185,51 @@ func addExpressionHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	mu.Unlock()
 
-	go calculateExpression(task, id)
+	go calculateExpression(task, id, *r, id_ex, db)
 
 	fmt.Fprint(w, id)
 }
 
-func calculateExpression(task *Task, id string) {
+func calculateExpression(task *Task, id string, r http.Request, id_ex int, db *sql.DB) {
 	expression := infixToPostfix(task.Expr)
-	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(times.time_limit)*time.Second)
+	tokenString := r.FormValue("token")
+	var aaa []int
+	tokenFromString, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
+		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
+			panic(fmt.Errorf("unexpected signing method: %v", token.Header["alg"]))
+		}
+
+		return []byte("super_secret_signature"), nil
+	})
+
+	if err != nil {
+		log.Fatal(err)
+	}
+	var username interface{}
+	if claims, ok := tokenFromString.Claims.(jwt.MapClaims); ok {
+		username = claims["username"]
+	} else {
+		panic(err)
+	}
+	var q = "SELECT time_limit FROM users WHERE username = $1"
+	rows, err := db.QueryContext(context.TODO(), q, username)
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var u int
+		err := rows.Scan(&u)
+		if err != nil {
+			return
+		}
+		aaa = append(aaa, u)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(aaa[0])*time.Second)
 	defer cancel()
 	ch_res := make(chan Result)
-	go main2(expression, ch_res)
+	go main2(expression, ch_res, r, id_ex, db)
 	select {
 	case result := <-ch_res:
 		if result.Err != nil {
@@ -219,11 +257,11 @@ func calculateExpression(task *Task, id string) {
 func listExpressionsHandler(w http.ResponseWriter, r *http.Request) {
 	tokenString := r.FormValue("token")
 	db, err := sql.Open("sqlite3", "DataBase.db")
-
 	var expressions []Task
-	var q = "SELECT id, expression, result, isReady FROM examples WHERE token = $1)"
+	var q = "SELECT id, expression, result, isReady FROM examples WHERE token_user = $1"
 	rows, err := db.QueryContext(context.TODO(), q, tokenString)
 	if err != nil {
+		fmt.Println(err)
 		return
 	}
 	defer rows.Close()
@@ -242,10 +280,8 @@ func listExpressionsHandler(w http.ResponseWriter, r *http.Request) {
 	for _, expr := range expressions {
 		expr.Expr = strings.Replace(expr.Expr, " ", "+", -1)
 		expressionList = append(expressionList, &expr)
-		fmt.Fprintln(w, expr.ID, expr.Expr, expr.IsReady, expr.Result)
+		fmt.Fprintln(w, "ID: "+expr.ID, "| expression: "+expr.Expr, "| status:", expr.IsReady, "| result:", expr.Result)
 	}
-
-	json.NewEncoder(w).Encode(expressionList)
 }
 
 func settime(w http.ResponseWriter, r *http.Request) {
@@ -261,6 +297,37 @@ func settime(w http.ResponseWriter, r *http.Request) {
 		time_multiply: time_mul,
 		time_limit:    time_li,
 	}
+	tokenString := r.FormValue("token")
+	db, err := sql.Open("sqlite3", "DataBase.db")
+	var q = "UPDATE users SET time_plus = $1 WHERE token = $2"
+	_, err = db.ExecContext(context.TODO(), q, time_pl, tokenString)
+	if err != nil {
+		return
+	}
+
+	var qq = "UPDATE users SET time_minus = $1 WHERE token = $2"
+	_, err = db.ExecContext(context.TODO(), qq, time_mi, tokenString)
+	if err != nil {
+		return
+	}
+
+	var qqq = "UPDATE users SET time_divide = $1 WHERE token = $2"
+	_, err = db.ExecContext(context.TODO(), qqq, time_de, tokenString)
+	if err != nil {
+		return
+	}
+
+	var qqqq = "UPDATE users SET time_multiply = $1 WHERE token = $2"
+	_, err = db.ExecContext(context.TODO(), qqqq, time_mul, tokenString)
+	if err != nil {
+		return
+	}
+
+	var qqqqq = "UPDATE users SET time_limit = $1 WHERE token = $2"
+	_, err = db.ExecContext(context.TODO(), qqqqq, time_li, tokenString)
+	if err != nil {
+		return
+	}
 }
 
 func createTables(ctx context.Context, db *sql.DB) error {
@@ -269,7 +336,12 @@ func createTables(ctx context.Context, db *sql.DB) error {
 	CREATE TABLE IF NOT EXISTS users(
 		id INTEGER PRIMARY KEY AUTOINCREMENT, 
 		username TEXT,
-		password TEXT
+		password TEXT,
+		time_plus INTEGER,
+	    time_minus INTEGER,
+	    time_divide INTEGER,
+	    time_multiply INTEGER,
+	    time_limit INTEGER
 	);`
 		expressionsTable = `
 	CREATE TABLE IF NOT EXISTS examples (
@@ -280,15 +352,12 @@ func createTables(ctx context.Context, db *sql.DB) error {
     isReady		 bool
 	);`
 	)
-	fmt.Println("_+_+_+_+_+_+_+_+_+_+_+_+_")
 	if _, err := db.ExecContext(ctx, usersTable); err != nil {
 		return err
 	}
-	fmt.Println("_+_+_+_+_+_+_+_+_+_+_+_+_")
 	if _, err := db.ExecContext(ctx, expressionsTable); err != nil {
 		return err
 	}
-	fmt.Println("_+_+_+_+_+_+_+_+_+_+_+_+_")
 	return nil
 }
 
@@ -298,26 +367,22 @@ func createDB() (*sql.DB, error) {
 	if err != nil {
 		return nil, err
 	}
-	fmt.Println("_+_+_+_+_+_+_+_+_+_+_+_+_")
 	err = db.PingContext(ctx)
-	fmt.Println("_+_+_+_+_+_+_+_+_+_+_+_+_")
 	if err != nil {
 		return nil, err
 	}
-	fmt.Println("_+_+_+_+_+_+_+_+_+_+_+_+_")
 	if err = createTables(ctx, db); err != nil {
 		return nil, err
 	}
-	fmt.Println("_+_+_+_+_+_+_+_+_+_+_+_+_")
 
 	return db, nil
 }
 
 func insertUser(ctx context.Context, db *sql.DB, user *User) (int64, error) { // Добавлен параметр db
 	var q = `
-	INSERT INTO users (username, password) values ($1, $2)
+	INSERT INTO users (username, password, time_plus, time_minus, time_divide, time_multiply, time_limit) values ($1, $2, $3, $4, $5, $6, $7)
 	`
-	result, err := db.ExecContext(ctx, q, user.Username, user.Password) // Исправлен запрос
+	result, err := db.ExecContext(ctx, q, user.Username, user.Password, 10, 10, 10, 10, 50) // Исправлен запрос
 	if err != nil {
 		return 0, err
 	}
@@ -351,17 +416,13 @@ func isUserExists(ctx context.Context, db *sql.DB, username string) (bool, error
 
 // Обработчик регистрации нового пользователя
 func registerUserHandler(w http.ResponseWriter, r *http.Request) {
-	fmt.Println("=======================")
-	r.ParseForm() // Добавлен вызов ParseForm для обработки POST данных
-	fmt.Println("=======================")
+	r.ParseForm()                       // Добавлен вызов ParseForm для обработки POST данных
 	username := r.FormValue("username") // Исправлено использование FormValue для получения данных
 	password := r.FormValue("password") // Исправлено использование FormValue для получения данных
 	if username == "" || password == "" {
 		http.Error(w, "Username and password are required", http.StatusBadRequest)
 		return
 	}
-	fmt.Println("=======================")
-	fmt.Println("=======================")
 	const hmacSampleSecret = "super_secret_signature"
 	now := time.Now()
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
@@ -371,36 +432,30 @@ func registerUserHandler(w http.ResponseWriter, r *http.Request) {
 		"exp":      now.Add(5 * time.Minute).Unix(),
 		"iat":      now.Unix(),
 	})
-	fmt.Println("=======================")
 	tokenString, err := token.SignedString([]byte(hmacSampleSecret))
 	if err != nil {
 		panic(err)
 	}
-	fmt.Println("=======================")
 	fmt.Println(tokenString)
 	user := &User{
 		Username: username,
 		Password: password,
 	}
-	fmt.Println("=======================")
 	db, err := createDB()
 	exists, err := isUserExists(context.TODO(), db, username)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	fmt.Println("=======================")
 	if exists {
 		http.Error(w, "Такой пользователь уже существует", http.StatusBadRequest)
 		return
 	}
-	fmt.Println("=======================")
 	// Создание базы данных для добавления пользователя
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	fmt.Println("=======================")
 	db, err = sql.Open("sqlite3", "DataBase.db")
 	_, err = insertUser(context.TODO(), db, user) // Исправлен вызов insertUser
 	defer db.Close()
@@ -408,7 +463,6 @@ func registerUserHandler(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	fmt.Println("=======================")
 	// Отправляем ответ клиенту
 	w.WriteHeader(http.StatusCreated)
 	fmt.Fprintln(w, "Регистрация прошла успешно")
@@ -418,7 +472,6 @@ func registerUserHandler(w http.ResponseWriter, r *http.Request) {
 func findUser(w http.ResponseWriter, ctx context.Context, db *sql.DB, username, password string) (*User, error) {
 	db, err := sql.Open("sqlite3", "DataBase.db")
 	var user User
-	fmt.Println(username, password)
 	err = db.QueryRowContext(ctx, "SELECT id FROM users WHERE username = $1 AND password = $2", username, password).Scan(&user.ID)
 	if err != nil {
 		if err == sql.ErrNoRows {
@@ -577,23 +630,189 @@ type Result struct {
 	Err   error
 }
 
-func calculate_plus(expression Expression) Result {
-	time.Sleep(time.Duration(times.time_plus) * time.Second)
+func calculate_plus(expression Expression, r http.Request) Result {
+	tokenString := r.FormValue("token")
+	db, err := sql.Open("sqlite3", "DataBase.db")
+	var expressions []int
+	tokenFromString, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
+		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
+			panic(fmt.Errorf("unexpected signing method: %v", token.Header["alg"]))
+		}
+
+		return []byte("super_secret_signature"), nil
+	})
+
+	if err != nil {
+		log.Fatal(err)
+	}
+	var username interface{}
+	if claims, ok := tokenFromString.Claims.(jwt.MapClaims); ok {
+		username = claims["username"]
+	} else {
+		panic(err)
+	}
+	var q = "SELECT time_plus FROM users WHERE username = $1"
+	rows, err := db.QueryContext(context.TODO(), q, username)
+	if err != nil {
+		fmt.Println(err)
+		return Result{
+			Value: 0,
+			Err:   err,
+		}
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var u int
+		err := rows.Scan(&u)
+		if err != nil {
+			return Result{
+				Value: 0,
+				Err:   err,
+			}
+		}
+		expressions = append(expressions, u)
+	}
+
+	time.Sleep(time.Duration(expressions[0]) * time.Second)
 	return Result{Value: expression.Operand1 + expression.Operand2}
 }
 
-func calculate_minus(expression Expression) Result {
-	time.Sleep(time.Duration(times.time_minus) * time.Second)
+func calculate_minus(expression Expression, r http.Request) Result {
+	tokenString := r.FormValue("token")
+	db, err := sql.Open("sqlite3", "DataBase.db")
+	var expressions []int
+	tokenFromString, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
+		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
+			panic(fmt.Errorf("unexpected signing method: %v", token.Header["alg"]))
+		}
+
+		return []byte("super_secret_signature"), nil
+	})
+
+	if err != nil {
+		log.Fatal(err)
+	}
+	var username interface{}
+	if claims, ok := tokenFromString.Claims.(jwt.MapClaims); ok {
+		username = claims["username"]
+	} else {
+		panic(err)
+	}
+	var q = "SELECT time_minus FROM users WHERE username = $1"
+	rows, err := db.QueryContext(context.TODO(), q, username)
+	if err != nil {
+		fmt.Println(err)
+		return Result{
+			Value: 0,
+			Err:   err,
+		}
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var u int
+		err := rows.Scan(&u)
+		if err != nil {
+			return Result{
+				Value: 0,
+				Err:   err,
+			}
+		}
+		expressions = append(expressions, u)
+	}
+
+	time.Sleep(time.Duration(expressions[0]) * time.Second)
 	return Result{Value: expression.Operand1 - expression.Operand2}
 }
 
-func calculate_multiply(expression Expression) Result {
-	time.Sleep(time.Duration(times.time_multiply) * time.Second)
+func calculate_multiply(expression Expression, r http.Request) Result {
+	tokenString := r.FormValue("token")
+	db, err := sql.Open("sqlite3", "DataBase.db")
+	var expressions []int
+	tokenFromString, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
+		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
+			panic(fmt.Errorf("unexpected signing method: %v", token.Header["alg"]))
+		}
+
+		return []byte("super_secret_signature"), nil
+	})
+
+	if err != nil {
+		log.Fatal(err)
+	}
+	var username interface{}
+	if claims, ok := tokenFromString.Claims.(jwt.MapClaims); ok {
+		username = claims["username"]
+	} else {
+		panic(err)
+	}
+	var q = "SELECT time_multiply FROM users WHERE username = $1"
+	rows, err := db.QueryContext(context.TODO(), q, username)
+	if err != nil {
+		fmt.Println(err)
+		return Result{
+			Value: 0,
+			Err:   err,
+		}
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var u int
+		err := rows.Scan(&u)
+		if err != nil {
+			return Result{
+				Value: 0,
+				Err:   err,
+			}
+		}
+		expressions = append(expressions, u)
+	}
+	time.Sleep(time.Duration(expressions[0]) * time.Second)
 	return Result{Value: expression.Operand1 * expression.Operand2}
 }
 
-func calculate_division(expression Expression) Result {
-	time.Sleep(time.Duration(times.time_divide) * time.Second)
+func calculate_division(expression Expression, r http.Request) Result {
+	tokenString := r.FormValue("token")
+	db, err := sql.Open("sqlite3", "DataBase.db")
+	var expressions []int
+	tokenFromString, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
+		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
+			panic(fmt.Errorf("unexpected signing method: %v", token.Header["alg"]))
+		}
+
+		return []byte("super_secret_signature"), nil
+	})
+
+	if err != nil {
+		log.Fatal(err)
+	}
+	var username interface{}
+	if claims, ok := tokenFromString.Claims.(jwt.MapClaims); ok {
+		username = claims["username"]
+	} else {
+		panic(err)
+	}
+	var q = "SELECT time_divide FROM users WHERE username = $1"
+	rows, err := db.QueryContext(context.TODO(), q, username)
+	if err != nil {
+		fmt.Println(err)
+		return Result{
+			Value: 0,
+			Err:   err,
+		}
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var u int
+		err := rows.Scan(&u)
+		if err != nil {
+			return Result{
+				Value: 0,
+				Err:   err,
+			}
+		}
+		expressions = append(expressions, u)
+	}
+	time.Sleep(time.Duration(expressions[0]) * time.Second)
 	if expression.Operand2 == 0 {
 		return Result{Err: fmt.Errorf("division by zero")}
 	}
@@ -604,7 +823,7 @@ func remove(slice []string, s int) []string {
 	return append(slice[:s], slice[s+1:]...)
 }
 
-func main2(expression []string, ch_res chan Result) {
+func main2(expression []string, ch_res chan Result, r http.Request, id_ex int, db *sql.DB) {
 	for h := 0; h < len(expression); h++ {
 		if expression[h] != "0" && expression[h] != "1" && expression[h] != "2" && expression[h] != "3" && expression[h] != "4" && expression[h] != "5" && expression[h] != "6" && expression[h] != "7" && expression[h] != "8" && expression[h] != "9" && expression[h] != "+" && expression[h] != "-" && expression[h] != "*" && expression[h] != "/" {
 			ch_res <- Result{
@@ -643,13 +862,13 @@ func main2(expression []string, ch_res chan Result) {
 			Err:   nil,
 		}
 		if expression[jj] == "+" {
-			result = calculate_plus(Expression{expression[jj], a, b})
+			result = calculate_plus(Expression{expression[jj], a, b}, r)
 		} else if expression[jj] == "-" {
-			result = calculate_minus(Expression{expression[jj], a, b})
+			result = calculate_minus(Expression{expression[jj], a, b}, r)
 		} else if expression[jj] == "*" {
-			result = calculate_multiply(Expression{expression[jj], a, b})
+			result = calculate_multiply(Expression{expression[jj], a, b}, r)
 		} else if expression[jj] == "/" {
-			result = calculate_division(Expression{expression[jj], a, b})
+			result = calculate_division(Expression{expression[jj], a, b}, r)
 		} else {
 			result = Result{
 				Value: 0,
@@ -658,7 +877,6 @@ func main2(expression []string, ch_res chan Result) {
 		}
 
 		if result.Err != nil {
-			fmt.Println("sfdgbhjbhuklsfdbvlkjsvdflkjnfzvdsl;kjvdfa")
 			ch_res <- result
 		}
 		expression = remove(expression, jj-2)
@@ -672,7 +890,13 @@ func main2(expression []string, ch_res chan Result) {
 		}
 		if len(expression) == 0 {
 			ch_res <- result
-			fmt.Println(result.Value)
+			var q = "UPDATE examples SET result = $1, isReady = $2 WHERE id = $3"
+			_, err = db.ExecContext(context.TODO(), q, result.Value, true, id_ex)
+			fmt.Println(result.Value, "--------")
+			if err != nil {
+				fmt.Println(err)
+				return
+			}
 			break
 		}
 		for j := 0; j < len(expression); j++ {
