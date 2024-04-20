@@ -1,19 +1,20 @@
 127.0.0.1:8080/register?username=Victor&password=qwerty123
 
-127.0.0.1:8080/settime?time+=10&time-=10&time*=10&time/=10&time_limit=50
+127.0.0.1:8080/settime?time+=10&time-=10&time*=10&time/=10&time_limit=50&token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3MTMwODk2NjIsImlhdCI6MTcxMzA4OTM2MiwibmJmIjoxNzEzMDg5MzYyLCJ1c2VybmFtZSI6InZrIn0.x2pF-OinJ5EQ29UvW0rce2NI0K7N3q6NJ9UqyBgULTY
 
-127.0.0.1:8080/add?expression=(1+3)*5-2*7&token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3MTI5MzEyNjEsImlhdCI6MTcxMjkzMDk2MSwibmJmIjoxNzEyOTMwOTYxLCJ1c2VybmFtZSI6IjEifQ.Uso3RXUMV6izshXS0jAPFysoAtWKzkYW0RQHYbah28g
+127.0.0.1:8080/add?expression=(1+3)*5-2*7&token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3MTM2NTMxMDgsImlhdCI6MTcxMzY1MjkyOCwibmJmIjoxNzEzNjUyOTI4LCJ1c2VybmFtZSI6InZrIn0.yA3lnxEKxHGx4npiCVVKzyIfcfqezXPsGzVbd_C1AbE
 
-127.0.0.1:8080/list?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3MTI5MzQ3ODcsImlhdCI6MTcxMjkzNDQ4NywibmJmIjoxNzEyOTM0NDg3LCJ1c2VybmFtZSI6IjEifQ.UCXUSdGbvtVyzF91dIZ_2FbO1QaafIxi9fbRZPE0L24
-
+127.0.0.1:8080/list?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3MTM2NTMxMDgsImlhdCI6MTcxMzY1MjkyOCwibmJmIjoxNzEzNjUyOTI4LCJ1c2VybmFtZSI6InZrIn0.yA3lnxEKxHGx4npiCVVKzyIfcfqezXPsGzVbd_C1AbE
 
 http://127.0.0.1:8080/register?username=VictorKopytovqwerty&password=qwerty123
 http://127.0.0.1:8080/register?username=vk&password=vk
 http://127.0.0.1:8080/register?username=1&password=1
+http://127.0.0.1:8080/register?username=2&password=2
 
 http://127.0.0.1:8080/login?username=VictorKopytovqwerty&password=qwerty123
 http://127.0.0.1:8080/login?username=vk&password=vk
 http://127.0.0.1:8080/login?username=1&password=1
+http://127.0.0.1:8080/login?username=2&password=2
 
 http://127.0.0.1:8080/admin
 
@@ -23,10 +24,4 @@ go run orchestrator.go
 
 
 
-127.0.0.1:8080/add?expression=(1+3)*5-2*7&token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3MTI5MjA2MzEsImlhdCI6MTcxMjkyMDMzMSwibmJmIjoxNzEyOTIwMzMxLCJ1c2VybmFtZSI6IjIifQ.1Ij3jHi2R20eV9xXy5S3Sw3g2AdwEdmJzcujdZ4PLi4
-
-
-127.0.0.1:8080/list?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3MTI5MzYyMDAsImlhdCI6MTcxMjkzNTkwMCwibmJmIjoxNzEyOTM1OTAwLCJ1c2VybmFtZSI6IjEyMyJ9.pGsD_x627aeF3XCGlWJ9ocwG-2d8sunjsfQc6KXloRg
-
-
-127.0.0.1:8080/add?expression=2+2*2&token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3MTI5MzYyMDAsImlhdCI6MTcxMjkzNTkwMCwibmJmIjoxNzEyOTM1OTAwLCJ1c2VybmFtZSI6IjEyMyJ9.pGsD_x627aeF3XCGlWJ9ocwG-2d8sunjsfQc6KXloRg
+127.0.0.1:8080/add?expression=2+2*2&token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3MTM2MTcyODgsImlhdCI6MTcxMzYxNjM4OCwibmJmIjoxNzEzNjE2Mzg4LCJ1c2VybmFtZSI6IjIifQ.v4GW8lbZ7wbkZUBA_EGm2i3CJESLdOw4Gl7_NWLtzJE

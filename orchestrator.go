@@ -152,7 +152,7 @@ func addExpressionHandler(w http.ResponseWriter, r *http.Request) {
 	var exists bool
 	err = db.QueryRowContext(context.TODO(), "SELECT EXISTS (SELECT 1 FROM users WHERE username = ?)", username).Scan(&exists)
 	if err != nil {
-		http.Error(w, "invalid token2", http.StatusBadRequest)
+		http.Error(w, "invalid token", http.StatusBadRequest)
 		return
 	}
 	var id_ex int
@@ -196,13 +196,23 @@ func calculateExpression(task *Task, id string, r http.Request, id_ex int, db *s
 	var aaa []int
 	tokenFromString, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
 		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
+			task.IsReady = true
+			task.Result = 0
+			return nil, nil
 			panic(fmt.Errorf("unexpected signing method: %v", token.Header["alg"]))
 		}
-
 		return []byte("super_secret_signature"), nil
 	})
-
 	if err != nil {
+		task.IsReady = true
+		task.Result = 0
+		var q = "UPDATE examples SET result = $1, isReady = $2 WHERE id = $3"
+		_, err = db.ExecContext(context.TODO(), q, true, true, id_ex)
+		if err != nil {
+			fmt.Println(err)
+			return
+		}
+		return
 		log.Fatal(err)
 	}
 	var username interface{}
@@ -298,33 +308,51 @@ func settime(w http.ResponseWriter, r *http.Request) {
 		time_limit:    time_li,
 	}
 	tokenString := r.FormValue("token")
+
+	tokenFromString, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
+		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
+			panic(fmt.Errorf("unexpected signing method: %v", token.Header["alg"]))
+		}
+
+		return []byte("super_secret_signature"), nil
+	})
+	if err != nil {
+		log.Fatal(err)
+	}
+	var username interface{}
+	if claims, ok := tokenFromString.Claims.(jwt.MapClaims); ok {
+		username = claims["username"]
+	} else {
+		panic(err)
+	}
+
 	db, err := sql.Open("sqlite3", "DataBase.db")
-	var q = "UPDATE users SET time_plus = $1 WHERE token = $2"
-	_, err = db.ExecContext(context.TODO(), q, time_pl, tokenString)
+	var q = "UPDATE users SET time_plus = $1 WHERE username = $2"
+	_, err = db.ExecContext(context.TODO(), q, time_pl, username)
 	if err != nil {
 		return
 	}
 
-	var qq = "UPDATE users SET time_minus = $1 WHERE token = $2"
-	_, err = db.ExecContext(context.TODO(), qq, time_mi, tokenString)
+	var qq = "UPDATE users SET time_minus = $1 WHERE username = $2"
+	_, err = db.ExecContext(context.TODO(), qq, time_mi, username)
 	if err != nil {
 		return
 	}
 
-	var qqq = "UPDATE users SET time_divide = $1 WHERE token = $2"
-	_, err = db.ExecContext(context.TODO(), qqq, time_de, tokenString)
+	var qqq = "UPDATE users SET time_divide = $1 WHERE username = $2"
+	_, err = db.ExecContext(context.TODO(), qqq, time_de, username)
 	if err != nil {
 		return
 	}
 
-	var qqqq = "UPDATE users SET time_multiply = $1 WHERE token = $2"
-	_, err = db.ExecContext(context.TODO(), qqqq, time_mul, tokenString)
+	var qqqq = "UPDATE users SET time_multiply = $1 WHERE username = $2"
+	_, err = db.ExecContext(context.TODO(), qqqq, time_mul, username)
 	if err != nil {
 		return
 	}
 
-	var qqqqq = "UPDATE users SET time_limit = $1 WHERE token = $2"
-	_, err = db.ExecContext(context.TODO(), qqqqq, time_li, tokenString)
+	var qqqqq = "UPDATE users SET time_limit = $1 WHERE username = $2"
+	_, err = db.ExecContext(context.TODO(), qqqqq, time_li, username)
 	if err != nil {
 		return
 	}
@@ -345,11 +373,11 @@ func createTables(ctx context.Context, db *sql.DB) error {
 	);`
 		expressionsTable = `
 	CREATE TABLE IF NOT EXISTS examples (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    expression TEXT NOT NULL,
-    token_user TEXT,
-    result 		 string,
-    isReady		 bool
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		expression TEXT NOT NULL,
+		token_user TEXT,
+		result 		 string,
+		isReady		 bool
 	);`
 	)
 	if _, err := db.ExecContext(ctx, usersTable); err != nil {
@@ -429,7 +457,7 @@ func registerUserHandler(w http.ResponseWriter, r *http.Request) {
 		"name":     username,
 		"password": password,
 		"nbf":      now.Unix(),
-		"exp":      now.Add(5 * time.Minute).Unix(),
+		"exp":      now.Add(15 * time.Minute).Unix(),
 		"iat":      now.Unix(),
 	})
 	tokenString, err := token.SignedString([]byte(hmacSampleSecret))
@@ -499,7 +527,7 @@ func findUser(w http.ResponseWriter, ctx context.Context, db *sql.DB, username, 
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
 		"username": username,
 		"nbf":      now.Unix(),
-		"exp":      now.Add(5 * time.Minute).Unix(),
+		"exp":      now.Add(3 * time.Minute).Unix(),
 		"iat":      now.Unix(),
 	})
 	// Подписываем токен с секретным ключом
@@ -534,74 +562,6 @@ func loginHandler(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "User not found", http.StatusNotFound)
 		return
 	}
-	// Пользователь найден, создаем токен доступа
-	//token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
-	//	"username": user.Username,
-	//	"exp":      time.Now().Add(time.Hour * 24).Unix(),
-	//})
-	//// Подписываем токен с секретным ключом
-	//tokenString, err := token.SignedString([]byte("super_secret_signature"))
-	//if err != nil {
-	//	http.Error(w, err.Error(), http.StatusInternalServerError)
-	//	return
-	//}
-	//// Отправляем токен в ответе
-	//w.Header().Set("Content-Type", "application/json")
-	//json.NewEncoder(w).Encode(map[string]string{"token": tokenString})
-	//
-	//var q = "UPDATE users SET balance = balance+$1 WHERE id = $2"
-	//_, err = db.ExecContext(ctx, q, diff, id)
-	//if err != nil {
-	//	return err
-	//}
-
-}
-
-func admin(w http.ResponseWriter, r *http.Request) {
-	db, err := sql.Open("sqlite3", "DataBase.db")
-	if err != nil {
-		return
-	}
-	var users []User
-	var q = "SELECT id, Username, Password FROM users"
-	rows, err := db.QueryContext(context.TODO(), q)
-	if err != nil {
-		return
-	}
-	defer rows.Close()
-	for rows.Next() {
-		u := User{}
-		err := rows.Scan(&u.ID, &u.Username, &u.Password)
-		if err != nil {
-			return
-		}
-		users = append(users, u)
-	}
-	for i := 0; i < len(users); i++ {
-		fmt.Fprintln(w, users[i].ID, users[i].Username, users[i].Password)
-	}
-	fmt.Fprintln(w, "\n================================================\n")
-	var expressionDB []ExpressionDB
-	var qq = "SELECT expression, token_user FROM examples"
-	rows, err = db.QueryContext(context.TODO(), qq)
-	if err != nil {
-		return
-	}
-	defer rows.Close()
-	for rows.Next() {
-		u := ExpressionDB{}
-		err := rows.Scan(&u.expression, &u.token_user)
-		if err != nil {
-			return
-		}
-		expressionDB = append(expressionDB, u)
-	}
-	for i := 0; i < len(expressionDB); i++ {
-		fmt.Fprintln(w, expressionDB[i].expression, expressionDB[i].token_user)
-		fmt.Fprintln(w, "________________________________")
-	}
-	fmt.Println("------------------------------------")
-	return
 }
 
 func main() {
@@ -611,11 +571,63 @@ func main() {
 	http.HandleFunc("/register", registerUserHandler)
 	http.HandleFunc("/login", loginHandler)
 
-	http.HandleFunc("/admin", admin)
-
 	fmt.Println("Server is running on port 8080")
+	restartPendingTasks()
 	if err := http.ListenAndServe(":8080", nil); err != nil {
 		fmt.Printf("Error starting server: %s\n", err)
+	}
+
+}
+
+func restartPendingTasks() {
+	db, err := sql.Open("sqlite3", "DataBase.db")
+	// Запрос к базе данных для поиска невыполненных задач
+	rows, err := db.QueryContext(context.TODO(), "SELECT id, expression, token_user FROM examples WHERE isReady = false")
+	if err != nil {
+		fmt.Println("Error querying database for pending tasks:", err)
+		return
+	}
+	defer rows.Close()
+
+	// Обработка результатов запроса
+	for rows.Next() {
+		var id int
+		var expression string
+		var token_user string
+		if err := rows.Scan(&id, &expression, &token_user); err != nil {
+			log.Println("Error scanning rows for pending tasks:", err)
+			continue
+		}
+		fmt.Println(expression)
+		// Добавление задачи в очередь на выполнение
+		idStr := strconv.Itoa(id)
+		task := &Task{
+			ID:      idStr,
+			Expr:    expression,
+			Result:  0,
+			IsReady: false,
+		}
+		mu.Lock()
+		tasks[idStr] = task
+		expressions[idStr] = &Expression2{
+			ID:         idStr,
+			Expression: expression,
+			Status:     "waiting",
+			Result:     0,
+			Date_start: time.Now(),
+		}
+		mu.Unlock()
+
+		// Запуск горутины для выполнения задачи
+		r, err := http.NewRequest("GET", "http://127.0.0.1:8080/add?expression="+expression+"&token="+token_user, nil)
+		if err != nil {
+			// handle error
+			log.Fatal(err)
+		}
+		go calculateExpression(task, idStr, *r, id, db)
+	}
+	if err := rows.Err(); err != nil {
+		log.Println("Error iterating over pending tasks:", err)
 	}
 }
 
