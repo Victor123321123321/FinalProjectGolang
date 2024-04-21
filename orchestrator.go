@@ -21,7 +21,7 @@ type Expression2 struct {
 	ID          string    `json:"id"`
 	Expression  string    `json:"expression"`
 	Status      string    `json:"status"`
-	Result      int       `json:"result"`
+	Result      string    `json:"result"`
 	Date_start  time.Time `json:"date_start"`
 	Date_finish time.Time `json:"date_finish"`
 }
@@ -29,7 +29,7 @@ type Expression2 struct {
 type Task struct {
 	ID      string
 	Expr    string
-	Result  int
+	Result  string
 	IsReady bool
 }
 
@@ -131,13 +131,15 @@ func addExpressionHandler(w http.ResponseWriter, r *http.Request) {
 	tokenString := r.FormValue("token")
 	tokenFromString, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
 		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
-			panic(fmt.Errorf("unexpected signing method: %v", token.Header["alg"]))
+			fmt.Fprintf(w, "Время действия токена истекло")
+			return nil, nil
 		}
 
 		return []byte("super_secret_signature"), nil
 	})
 	if err != nil {
-		log.Fatal(err)
+		fmt.Fprintf(w, "Время действия токена истекло")
+		return
 	}
 	var username interface{}
 	if claims, ok := tokenFromString.Claims.(jwt.MapClaims); ok {
@@ -147,7 +149,7 @@ func addExpressionHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	db, err := sql.Open("sqlite3", "DataBase.db")
 	if err != nil {
-		log.Fatal(err)
+		fmt.Fprintf(w, "Кажется что то пошло не так")
 	}
 	var exists bool
 	err = db.QueryRowContext(context.TODO(), "SELECT EXISTS (SELECT 1 FROM users WHERE username = ?)", username).Scan(&exists)
@@ -162,7 +164,7 @@ func addExpressionHandler(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "Failed to add expression to database", http.StatusInternalServerError)
 			return
 		}
-		fmt.Fprintf(w, "Expression added by user: %s", tokenString)
+		fmt.Fprintf(w, "Expression added by user")
 	} else {
 		http.Error(w, "Failed to add expression to database", http.StatusInternalServerError)
 		return
@@ -171,7 +173,7 @@ func addExpressionHandler(w http.ResponseWriter, r *http.Request) {
 	task := &Task{
 		ID:      id,
 		Expr:    expression,
-		Result:  0,
+		Result:  "0",
 		IsReady: false,
 	}
 	mu.Lock()
@@ -180,7 +182,7 @@ func addExpressionHandler(w http.ResponseWriter, r *http.Request) {
 		ID:         id,
 		Expression: expression,
 		Status:     "waiting",
-		Result:     0,
+		Result:     "0",
 		Date_start: time.Now(),
 	}
 	mu.Unlock()
@@ -197,7 +199,7 @@ func calculateExpression(task *Task, id string, r http.Request, id_ex int, db *s
 	tokenFromString, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
 		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
 			task.IsReady = true
-			task.Result = 0
+			task.Result = "0"
 			return nil, nil
 			panic(fmt.Errorf("unexpected signing method: %v", token.Header["alg"]))
 		}
@@ -205,15 +207,15 @@ func calculateExpression(task *Task, id string, r http.Request, id_ex int, db *s
 	})
 	if err != nil {
 		task.IsReady = true
-		task.Result = 0
+		task.Result = "The token has expired"
 		var q = "UPDATE examples SET result = $1, isReady = $2 WHERE id = $3"
-		_, err = db.ExecContext(context.TODO(), q, true, true, id_ex)
+		_, err = db.ExecContext(context.TODO(), q, task.Result, true, id_ex)
 		if err != nil {
 			fmt.Println(err)
 			return
 		}
 		return
-		log.Fatal(err)
+		fmt.Println("Кажется что то пошло не так")
 	}
 	var username interface{}
 	if claims, ok := tokenFromString.Claims.(jwt.MapClaims); ok {
@@ -243,23 +245,30 @@ func calculateExpression(task *Task, id string, r http.Request, id_ex int, db *s
 	select {
 	case result := <-ch_res:
 		if result.Err != nil {
+			task.Result = "division by zero"
 			task.IsReady = true
-			expressions[id].Result = 0
+			expressions[id].Result = "division by zero"
 			expressions[id].Status = "invalid operation"
-			expressions[id].Date_finish = time.Now()
 		} else {
-			task.Result = int(result.Value)
+			task.Result = fmt.Sprintf("%v", result.Value)
 			task.IsReady = true
 			expressions[id].Result = task.Result
 			expressions[id].Status = "Ready"
 		}
 		expressions[id].Date_finish = time.Now()
 	case <-ctx.Done():
-		task.Result = 0
+		task.Result = "0"
 		task.IsReady = true
-		expressions[id].Result = 0
+		expressions[id].Result = "0"
 		expressions[id].Status = "The operation has expired or been canceled."
 		expressions[id].Date_finish = time.Now()
+		var q = "UPDATE examples SET result = $1, isReady = $2 WHERE id = $3"
+		_, err = db.ExecContext(context.TODO(), q, "The operation has expired or been canceled", true, id_ex)
+		if err != nil {
+			fmt.Println(err)
+			return
+		}
+		break
 	}
 
 }
@@ -311,13 +320,13 @@ func settime(w http.ResponseWriter, r *http.Request) {
 
 	tokenFromString, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
 		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
-			panic(fmt.Errorf("unexpected signing method: %v", token.Header["alg"]))
+			fmt.Fprintf(w, "Кажется что то пошло не так")
 		}
 
 		return []byte("super_secret_signature"), nil
 	})
 	if err != nil {
-		log.Fatal(err)
+		fmt.Fprintf(w, "Кажется что то пошло не так")
 	}
 	var username interface{}
 	if claims, ok := tokenFromString.Claims.(jwt.MapClaims); ok {
@@ -460,11 +469,10 @@ func registerUserHandler(w http.ResponseWriter, r *http.Request) {
 		"exp":      now.Add(15 * time.Minute).Unix(),
 		"iat":      now.Unix(),
 	})
-	tokenString, err := token.SignedString([]byte(hmacSampleSecret))
+	_, err := token.SignedString([]byte(hmacSampleSecret))
 	if err != nil {
 		panic(err)
 	}
-	fmt.Println(tokenString)
 	user := &User{
 		Username: username,
 		Password: password,
@@ -598,13 +606,12 @@ func restartPendingTasks() {
 			log.Println("Error scanning rows for pending tasks:", err)
 			continue
 		}
-		fmt.Println(expression)
 		// Добавление задачи в очередь на выполнение
 		idStr := strconv.Itoa(id)
 		task := &Task{
 			ID:      idStr,
 			Expr:    expression,
-			Result:  0,
+			Result:  "0",
 			IsReady: false,
 		}
 		mu.Lock()
@@ -613,7 +620,7 @@ func restartPendingTasks() {
 			ID:         idStr,
 			Expression: expression,
 			Status:     "waiting",
-			Result:     0,
+			Result:     "0",
 			Date_start: time.Now(),
 		}
 		mu.Unlock()
@@ -622,7 +629,7 @@ func restartPendingTasks() {
 		r, err := http.NewRequest("GET", "http://127.0.0.1:8080/add?expression="+expression+"&token="+token_user, nil)
 		if err != nil {
 			// handle error
-			log.Fatal(err)
+			fmt.Println("Кажется что то пошло не так")
 		}
 		go calculateExpression(task, idStr, *r, id, db)
 	}
@@ -890,6 +897,13 @@ func main2(expression []string, ch_res chan Result, r http.Request, id_ex int, d
 
 		if result.Err != nil {
 			ch_res <- result
+			var q = "UPDATE examples SET result = $1, isReady = $2 WHERE id = $3"
+			_, err = db.ExecContext(context.TODO(), q, "invalid operation", true, id_ex)
+			if err != nil {
+				fmt.Println(err)
+				return
+			}
+			break
 		}
 		expression = remove(expression, jj-2)
 		expression = remove(expression, jj-2)
@@ -904,7 +918,6 @@ func main2(expression []string, ch_res chan Result, r http.Request, id_ex int, d
 			ch_res <- result
 			var q = "UPDATE examples SET result = $1, isReady = $2 WHERE id = $3"
 			_, err = db.ExecContext(context.TODO(), q, result.Value, true, id_ex)
-			fmt.Println(result.Value, "--------")
 			if err != nil {
 				fmt.Println(err)
 				return
